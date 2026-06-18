@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { GameState } from "../types";
 import {
   Sparkles,
@@ -37,7 +37,43 @@ export default function GameConsole({
   const [customAction, setCustomAction] = useState("");
   const [tipIndex, setTipIndex] = useState(0);
 
-  React.useEffect(() => {
+  // Typewriter style animation effect logic
+  const [displayedText, setDisplayedText] = useState("");
+  const [isFinished, setIsFinished] = useState(false);
+  const textToType = state.storyText || "Adventure is calling out from the shadows.";
+
+  useEffect(() => {
+    setDisplayedText("");
+    setIsFinished(false);
+    
+    let currentIndex = 0;
+    let timer: any = null;
+    
+    const type = () => {
+      if (currentIndex < textToType.length) {
+        setDisplayedText(textToType.substring(0, currentIndex + 1));
+        currentIndex++;
+        timer = setTimeout(type, 10); // Elegant, highly legible typing pace
+      } else {
+        setIsFinished(true);
+      }
+    };
+    
+    type();
+    
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [textToType, state.stepCount]);
+
+  const skipTypewriter = () => {
+    if (!isFinished) {
+      setDisplayedText(textToType);
+      setIsFinished(true);
+    }
+  };
+
+  useEffect(() => {
     let interval: any;
     if (loading) {
       interval = setInterval(() => {
@@ -129,13 +165,27 @@ export default function GameConsole({
             </div>
 
             {/* STORY TEXT DISPLAY */}
-            <div className="bg-slate-950/30 border border-slate-800/80 p-6 rounded-none space-y-4">
-              <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono uppercase tracking-widest border-b border-slate-800 pb-2">
-                <Compass className="w-3.5 h-3.5 text-indigo-400/60" />
-                Dungeon Master Log (Step #{state.stepCount})
+            <div 
+              onClick={skipTypewriter}
+              className="bg-slate-950/30 border border-slate-800/80 p-6 rounded-none space-y-4 cursor-pointer select-none group/story hover:bg-slate-950/40 hover:border-slate-700/80 transition-all duration-300"
+              title={!isFinished ? "Click to skip storyteller text animation" : undefined}
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono uppercase tracking-widest">
+                  <Compass className="w-3.5 h-3.5 text-indigo-400/60" />
+                  Dungeon Master Log (Step #{state.stepCount})
+                </div>
+                {!isFinished && (
+                  <span className="text-[9px] font-mono text-indigo-400/70 group-hover/story:text-indigo-400 transition-colors uppercase tracking-widest animate-pulse flex items-center gap-1">
+                    ⚡ CLICK TO BYPASS
+                  </span>
+                )}
               </div>
               <p className="text-slate-100 text-lg leading-relaxed font-serif italic whitespace-pre-line antialiased">
-                {state.storyText || "Adventure is calling out from the shadows."}
+                {displayedText}
+                {!isFinished && (
+                  <span className="inline-block w-1.5 h-4 bg-indigo-500 ml-1.5 animate-pulse"></span>
+                )}
               </p>
             </div>
 

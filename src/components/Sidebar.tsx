@@ -9,7 +9,11 @@ import {
   Bookmark,
   ChevronRight,
   Info,
-  Users
+  Users,
+  Sun,
+  CloudRain,
+  CloudLightning,
+  Cloud
 } from "lucide-react";
 
 interface SidebarProps {
@@ -21,6 +25,8 @@ interface SidebarProps {
   charactersMet: CharacterMet[];
   theme: string;
   factions?: FactionReputation[];
+  onOpenFeats?: () => void;
+  weather?: string;
 }
 
 export default function Sidebar({
@@ -31,7 +37,9 @@ export default function Sidebar({
   inventoryList,
   charactersMet,
   theme,
-  factions = []
+  factions = [],
+  onOpenFeats,
+  weather
 }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<"inventory" | "characters" | "factions">("inventory");
   const [hoveredItem, setHoveredItem] = useState<InventoryItem | null>(null);
@@ -65,8 +73,8 @@ export default function Sidebar({
           {characterName.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1 z-10">
-          <div className="text-indigo-400 text-[10px] font-bold tracking-widest font-mono uppercase">
-            {characterClass}
+          <div className="text-indigo-400 text-[10px] font-bold tracking-widest font-mono uppercase truncate" title={characterClass}>
+            {characterClass ? characterClass.split(" — ")[0] : "Wanderer"}
           </div>
           <h3 className="text-slate-100 font-serif italic text-base truncate">{characterName}</h3>
           <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1.5 mt-0.5">
@@ -88,6 +96,73 @@ export default function Sidebar({
           <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${Math.min(100, Math.max(15, stepCount * 12))}%` }}></div>
         </div>
       </div>
+
+      {/* ATMOSPHERIC MATRIX (WEATHER SYSTEM) */}
+      <div className="bg-slate-950/40 border border-slate-800 rounded-none p-3.5 space-y-2 relative overflow-hidden" id="weather-sidebar-card">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-slate-400 text-[9px] font-bold font-mono uppercase tracking-widest">
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              (weather || "Clear").toLowerCase() === "storm" ? "bg-purple-400 animate-ping" : "bg-sky-450 bg-sky-400 animate-pulse"
+            }`}></span>
+            Atmospheric Matrix
+          </div>
+          <span className="text-[10px] font-mono text-slate-500 font-medium">ENV-SYNC</span>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <div className={`w-9 h-9 flex items-center justify-center border rounded-none shrink-0 ${
+            (weather || "Clear").toLowerCase() === "storm" 
+              ? "bg-purple-950/60 border-purple-500/50 text-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.25)]"
+              : (weather || "Clear").toLowerCase() === "rain"
+              ? "bg-blue-950/50 border-blue-500/40 text-blue-400"
+              : (weather || "Clear").toLowerCase() === "fog"
+              ? "bg-slate-900 border-slate-700 text-slate-300"
+              : "bg-amber-950/30 border-amber-500/30 text-amber-500"
+          }`}>
+            {(() => {
+              const cond = (weather || "Clear").toLowerCase();
+              if (cond === "rain") return <CloudRain className="w-5 h-5 animate-pulse" />;
+              if (cond === "storm") return <CloudLightning className="w-5 h-5 animate-bounce text-purple-300" />;
+              if (cond === "fog") return <Cloud className="w-5 h-5 opacity-80" />;
+              return <Sun className="w-5 h-5" />;
+            })()}
+          </div>
+          
+          <div className="flex-1 min-w-0">
+            <h4 className={`text-xs font-mono font-bold uppercase tracking-wider ${
+              (weather || "Clear").toLowerCase() === "storm" 
+                ? "text-purple-400"
+                : (weather || "Clear").toLowerCase() === "rain"
+                ? "text-blue-400"
+                : (weather || "Clear").toLowerCase() === "fog"
+                ? "text-slate-300"
+                : "text-amber-400"
+            }`}>
+              {weather || "Clear"}
+            </h4>
+            <p className="text-[10px] text-slate-400 leading-normal font-mono">
+              {(() => {
+                const cond = (weather || "Clear").toLowerCase();
+                if (cond === "rain") return "Rain slickens footing & washes tracks.";
+                if (cond === "storm") return "Fierce storm. Action hazards active.";
+                if (cond === "fog") return "Muffled sound. Visibility near zero.";
+                return "Calm skies. Standard paths clear.";
+              })()}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* FEATS OF VALOR SHORTCUT TRIGGER */}
+      {onOpenFeats && (
+        <button
+          onClick={onOpenFeats}
+          className="w-full py-2 bg-slate-950 hover:bg-amber-950/20 border border-slate-800 hover:border-amber-500/35 text-slate-400 hover:text-amber-400 hover:shadow-[0_0_12px_rgba(245,158,11,0.08)] transition-all text-[10px] font-bold font-mono tracking-widest uppercase flex items-center justify-center gap-1.5 cursor-pointer rounded-none active:scale-95"
+          id="feats-valor-sidebar-btn"
+        >
+          <span>🏆</span> FEATS OF VALOR DOSSIER
+        </button>
+      )}
 
       {/* 3. DYNAMIC STATUS VIEWER TAB SWITCHER */}
       <div className="flex-1 flex flex-col min-h-0 space-y-3">

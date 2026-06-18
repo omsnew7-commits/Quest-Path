@@ -23,6 +23,8 @@ export interface ProceduralLocation {
   description: string;
   discoveredPOIs: string[];
   unexploredPOIs: string[];
+  x?: number;
+  y?: number;
 }
 
 export interface NPCDialogue {
@@ -32,12 +34,20 @@ export interface NPCDialogue {
   relationImpact: string;
 }
 
+export interface VisitedCoordinate {
+  name: string;
+  x: number;
+  y: number;
+  step: number;
+}
+
 export interface GameState {
   theme: string;
   artStyle: string;
   imageSize: "1K" | "2K" | "4K";
   characterName: string;
   characterClass: string;
+  characterBackground?: string;
   stepCount: number;
   storyText: string;
   visualPrompt: string;
@@ -50,6 +60,8 @@ export interface GameState {
   factions?: FactionReputation[]; // Faction standings
   currentLocation?: ProceduralLocation; // Procedural world coordinates
   lastNPCDialogue?: NPCDialogue; // Dynamic NPC Dialogue
+  visitedCoords?: VisitedCoordinate[];
+  weather?: string;
 }
 
 export interface ChatMessage {

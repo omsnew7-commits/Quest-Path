@@ -11,14 +11,16 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "15mb" }));
 
-// Lazy-initialization helper for Gemini SDK to prevent startup crashes if key is initially absent
+// Lazy-initialization helper for Gemini SDK to support hot-key rotation and prevent startup crashes if key is initially absent
 let aiClient: GoogleGenAI | null = null;
+let cachedKey: string | null = null;
 function getGeminiClient(): GoogleGenAI {
-  if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      throw new Error("GEMINI_API_KEY environment variable is required to play the game.");
-    }
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("GEMINI_API_KEY environment variable is required to play or generate adventure chapters.");
+  }
+  if (!aiClient || cachedKey !== key) {
+    cachedKey = key;
     aiClient = new GoogleGenAI({
       apiKey: key,
       httpOptions: {
@@ -29,6 +31,37 @@ function getGeminiClient(): GoogleGenAI {
     });
   }
   return aiClient;
+}
+
+// Extract standard readable message from raw errors/ApiError
+function extractCleanErrorMessage(error: any): string {
+  if (!error) return "An unknown error occurred.";
+  let msg = error.message || "";
+  
+  if (typeof msg === "string") {
+    // Look for stringified ApiError with JSON details
+    const jsonMatch = msg.match(/ApiError:\s*(\{.*\})/i);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[1]);
+        if (parsed?.error?.message) {
+          return parsed.error.message;
+        }
+      } catch (e) {}
+    }
+    if (msg.includes("leaked") || msg.includes("API key")) {
+      return "Your API key was reported as leaked/compromised. Please update your GEMINI_API_KEY in the top Settings menu.";
+    }
+  }
+
+  try {
+    const parsedErr = JSON.parse(msg);
+    if (parsedErr?.error?.message) {
+      return parsedErr.error.message;
+    }
+  } catch (e) {}
+
+  return msg || String(error);
 }
 
 // Low-latency story narrative schema
@@ -108,9 +141,17 @@ const storySchema = {
           type: Type.ARRAY,
           items: { type: Type.STRING },
           description: "List of newly generated nearby points of interest waiting to be explored."
+        },
+        x: {
+          type: Type.INTEGER,
+          description: "Relative grid map coordinate X. Starting location is 0. If moving to an unexplored POI or adjacent area, generate new coordinate relative to previous steps (e.g. step x +/- 2 or 3). Range: -30 to 30."
+        },
+        y: {
+          type: Type.INTEGER,
+          description: "Relative grid map coordinate Y. Starting location is 0. If moving to an unexplored POI or adjacent area, generate new coordinate relative to previous steps (e.g. step y +/- 2 or 3). Range: -30 to 30."
         }
       },
-      required: ["name", "region", "description", "discoveredPOIs", "unexploredPOIs"]
+      required: ["name", "region", "description", "discoveredPOIs", "unexploredPOIs", "x", "y"]
     },
     lastNPCDialogue: {
       type: Type.OBJECT,
@@ -122,9 +163,13 @@ const storySchema = {
         relationImpact: { type: Type.STRING, description: "Social score consequence summary, e.g., '+10 standing with Crimson Guild'" }
       },
       required: ["speaker", "text", "mood", "relationImpact"]
+    },
+    weather: {
+      type: Type.STRING,
+      description: "The overarching ambient weather condition of the immediate scene. MUST be exactly one of: 'Clear', 'Rain', 'Fog', 'Storm'. Ensure it links with the narrative description and poses atmospheric or mechanical challenges/bonuses (e.g., storms block pathways, thick fog makes exploration treacherous, rain can extinguish flames or wash away tracks)."
     }
   },
-  required: ["storyText", "visualPrompt", "options", "questUpdate", "inventoryList", "charactersMet", "factions", "currentLocation", "lastNPCDialogue"]
+  required: ["storyText", "visualPrompt", "options", "questUpdate", "inventoryList", "charactersMet", "factions", "currentLocation", "lastNPCDialogue", "weather"]
 };
 
 // API Endpoints
@@ -132,26 +177,29 @@ const storySchema = {
 // 1. Kickstart an adventure with a specific theme and art style
 app.post("/api/adventure/start", async (req, res) => {
   try {
-    const { theme, artStyle, characterClass, characterName } = req.body;
+    const { theme, artStyle, characterClass, characterName, characterBackground, characterMotivation } = req.body;
     const ai = getGeminiClient();
+    const heroBg = characterBackground || characterMotivation || "";
 
     const systemInstruction = `You are the ultimate interactive Game Master (DM) for a deep, infinite Choose-Your-Own-Adventure game.
-Your task is to craft a highly compelling introduction that matches the selected Theme and Characters.
+Your task is to craft a highly compelling introduction that matches the selected Theme, Characters, and their personal Background/Motivation.
 
 Specifically implement these systems from Step 1:
-1. DIALOGUE SYSTEM: Seed an initial dialog spoken by a present companion, or a mysterious nearby observer. Ensure the dialogue references the player's class, name, or starting equipment and fits their personality.
+1. DIALOGUE SYSTEM & CHARACTER INTERACTIONS: Seed an initial dialog spoken by a present companion, or a mysterious nearby observer. Ensure the dialogue, attitudes, and reactions of characters/NPCs are strongly influenced by and references the player's written hero background or motivation paragraph ("${heroBg || "no background specified"}"), as well as their class, name, or starting equipment, and fits their personality.
 2. REPUTATION SYSTEM: Initialize 2 to 3 major world factions or guilds appropriate to the theme "${theme || "Magic Tech"}". Set their starting standings (Neutral = 0 standing, range is -100 to +100) and descriptions.
-3. PROCEDURAL WORLD GEN: Procedurally generate the starting exact location (name, overarching region name, and a sensory detailed description). Also generate 2 nearby "discoveredPOIs" and 2-3 fascinating "unexploredPOIs" that represent nearby unexplored areas matching the theme and art style.
+3. PROCEDURAL WORLD GEN: Procedurally generate the starting exact location (name, overarching region name, and a sensory detailed description). Also generate 2 nearby "discoveredPOIs" and 2-3 fascinating "unexploredPOIs" that represent nearby unexplored areas matching the theme and art style. For the starting location, initialize the grid coordinates to x: 0, y: 0.
+4. WEATHER & CHALLENGE SYSTEM: Initialize the active weather state ('Clear', 'Rain', 'Fog', or 'Storm') as the starting setting and write it into the narrative. The weather should feel highly cohesive with the starting location.
 
 Generate responses strictly matching the requested JSON format. Do not add any conversational text before or after the JSON.`;
 
     const prompt = `Start a brand new adventure!
 Character Name: ${characterName || "Unnamed Adventurer"}
 Character Class: ${characterClass || "Wanderer"}
+Character Background/Motivation: ${heroBg || "Not specified."}
 Game Theme: ${theme || "Classic Medieval Fantasy"}
 Visual Art Style: ${artStyle || "Vibrant Watercolor Painting"}
 
-Craft the opening chapter of the tale. Define the starting location, factions, initial inventory, quest, characters, and initial dialogue. Provide exactly 3 highly interesting pathways.`;
+Craft the opening chapter of the tale. Define the starting location, factions, initial inventory, quest, characters, and initial dialogue. Provide exactly 3 highly interesting pathways. NPCs present should strongly react to or reflect the player's personal background/motivation.`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3.1-flash-lite", // Low-latency model requested
@@ -171,7 +219,7 @@ Craft the opening chapter of the tale. Define the starting location, factions, i
     res.json(JSON.parse(response.text.trim()));
   } catch (error: any) {
     console.error("Error at start endpoint:", error);
-    res.status(500).json({ error: error?.message || "Failed to start the adventure engine." });
+    res.status(500).json({ error: extractCleanErrorMessage(error) });
   }
 });
 
@@ -183,6 +231,7 @@ app.post("/api/adventure/step", async (req, res) => {
       artStyle,
       characterClass,
       characterName,
+      characterBackground,
       choice,
       previousHistory, // array of { text: string (state/desc/actions taken) }
       currentInventory,
@@ -193,13 +242,14 @@ app.post("/api/adventure/step", async (req, res) => {
     } = req.body;
 
     const ai = getGeminiClient();
+    const heroBg = characterBackground || "";
 
     const systemInstruction = `You are the Game Master (DM) for an infinite Choose-Your-Own-Adventure game.
 The player will state their choice or action. You MUST dynamically simulate the world, determine success or failure, and output the resulting story step.
 
 You must integrate:
-1. DYNAMIC DIALOGUE SYSTEM: An NPC (established companion, faction member, or foe) must speak! The dialogue must be highly contextual:
-   - It MUST explicitly react to the player's current items in inventory, or selected class, or previous choices, or faction stand.
+1. DYNAMIC DIALOGUE & CHARACTER INTERACTIONS: An NPC (established companion, faction member, or foe) must speak! The dialogue and the NPC's attitude/attitude change must be highly contextual:
+   - It MUST explicitly react to the player's written background/motivation (${heroBg ? `"${heroBg}"` : "no background specified"}), as well as current items in inventory, selected class, previous choices, or faction stand.
    - It must remain perfectly loyal to their personality (e.g. snarky, hostile, revering, professional).
 2. REPUTATION & FACTION SYSTEM: Maintain and update the factions standing list:
    - Adjust standings (-100 to +100) based on social or action outcomes (e.g. -10 for breaking laws, +15 for helping their agents).
@@ -207,18 +257,25 @@ You must integrate:
    - Update relationship scores of individual NPCs in the "charactersMet" list accordingly.
 3. PROCEDURAL WORLD GENERATION: Generate cohesive new environments and unexplored areas:
    - If the player's choice specifies traveling or exploring a point of interest, update the "currentLocation" to make that POI the current name, add it to discoveredPOIs, and procedurally generate 2 to 3 new unexploredPOIs or landmarks in the surrounding region.
+   - For map coordinates x and y, read the incoming currentLocation's coordinates (or default to 0,0), and increment or decrement them by 1, 2, or 3 based on the compass direction or spatial distance implied by the player's choice or narrative path. Maintain a cumulative path from the starting 0,0 origin.
    - Maintain perfect thematic cohesion and atmospheric consistency with the selected Theme ("${theme}") and visual Art Style ("${artStyle}").
+4. DYNAMIC WEATHER & CHALLENGE SYSTEM:
+   - Select and update the 'weather' field to exactly one of: 'Clear', 'Rain', 'Fog', 'Storm'.
+   - The weather should transition logically step-to-step (e.g. from Clear to Rain, Rain to Storm, Storm to Fog), or sometimes stay constant. It should also match the environment (e.g. going deep inside a sealed temple / cave would generally hold calm/sheltered air, while outdoor regions undergo full weather shifts).
+   - Integrate the weather explicitly into 'storyText'. The weather MUST actively influence environmental challenges (e.g., heavy rain slicking cliffside trails, fog obscuring ancient warning signs, a storm kicking up sand or debris requiring finding shelter, or clear skies illuminating rare glowing leylines).
+   - Have options in the choices reflect these weather hazards or opportunities (e.g., using a thunderstorm to sneak past camps, using heavy rain to wash away tracks, or having to deal with freezing cold in a icy wind storm).
 
 We are tracking inventory and quests. Update these lists intelligently based on what occurs.
 E.g., if they pick up an ancient skull, add it to 'inventoryList'. If they consume a potion, remove it.
 
-Ensure the 3 choices you provide are incredibly interesting, divergent, and directly tied to the newly generated unexplored POIs or faction outcomes.
+Ensure the 3 choices you provide are incredibly interesting, divergent, and directly tied to the newly generated unexplored POIs, faction outcomes, and current weather environmental conditions.
 Do not output anything except the pristine JSON structure.`;
 
     const prompt = `The player is navigating a story with:
 Theme: ${theme}
 Art Style: ${artStyle}
 Character: ${characterName} (${characterClass})
+Character Background/Motivation: ${heroBg || "Not specified."}
 
 Current Quest: ${currentQuest}
 Current Inventory: ${JSON.stringify(currentInventory || [])}
@@ -253,7 +310,7 @@ Apply procedural location changes if they explored a new POI, recalculate factio
     res.json(JSON.parse(response.text.trim()));
   } catch (error: any) {
     console.error("Error at adventure step endpoint:", error);
-    res.status(500).json({ error: error?.message || "Failed to progress story step." });
+    res.status(500).json({ error: extractCleanErrorMessage(error) });
   }
 });
 
@@ -333,7 +390,7 @@ app.post("/api/adventure/image", async (req, res) => {
     res.json({ imageUrl: `data:image/png;base64,${base64Image}` });
   } catch (error: any) {
     console.error("Error at adventure image endpoint:", error);
-    res.status(500).json({ error: error?.message || "Failed to generate dynamic scene artwork." });
+    res.status(500).json({ error: extractCleanErrorMessage(error) });
   }
 });
 
@@ -347,10 +404,12 @@ app.post("/api/adventure/chat", async (req, res) => {
       currentQuest,
       characterName,
       characterClass,
+      characterBackground,
       currentInventory
     } = req.body;
 
     const ai = getGeminiClient();
+    const heroBg = characterBackground || "";
 
     // Set specialized role system instructions
     let chatbotRolePrompt = "";
@@ -373,6 +432,7 @@ Use the current context to make comments extremely relevant:
 Current Story Stage: "${currentStoryText || "Just starting"}"
 Current Quest: "${currentQuest || "Explore the unknown"}"
 Adventurer: ${characterName} (${characterClass})
+Adventurer Background & Motivation: "${heroBg || "None specified"}"
 Inventory: ${JSON.stringify(currentInventory || [])}`;
 
     // Convert chatHistory to model contents
@@ -404,7 +464,7 @@ Inventory: ${JSON.stringify(currentInventory || [])}`;
     res.json({ text: response.text || "I was in deep thought. Speak to me again!" });
   } catch (error: any) {
     console.error("Error at companion chat endpoint:", error);
-    res.status(500).json({ error: error?.message || "Companion is currently silent." });
+    res.status(500).json({ error: extractCleanErrorMessage(error) });
   }
 });
 

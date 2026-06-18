@@ -15,6 +15,7 @@ interface CompanionChatProps {
   currentQuest: string;
   characterName: string;
   characterClass: string;
+  characterBackground?: string;
   currentInventory: any[];
 }
 
@@ -23,6 +24,7 @@ export default function CompanionChat({
   currentQuest,
   characterName,
   characterClass,
+  characterBackground,
   currentInventory
 }: CompanionChatProps) {
   const [role, setRole] = useState<CompanionRole>("companion");
@@ -62,6 +64,7 @@ export default function CompanionChat({
           currentQuest,
           characterName,
           characterClass,
+          characterBackground,
           currentInventory
         })
       });
@@ -129,6 +132,7 @@ export default function CompanionChat({
           currentQuest,
           characterName,
           characterClass,
+          characterBackground,
           currentInventory
         })
       });
