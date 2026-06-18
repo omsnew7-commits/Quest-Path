@@ -1,0 +1,6 @@
+{
+  "name": "Infinite Adventure Engine",
+  "description": "An infinite choose-your-own-adventure engine with real-time dynamic story paths, automated sidebar status tracking for inventory and quests, consistent visual style and multi-turn companion AI assistance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
